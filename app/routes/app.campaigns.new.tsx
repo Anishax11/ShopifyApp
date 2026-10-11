@@ -17,13 +17,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const rewards = [];
 
   for (let i = 0; i < rewardCount; i++) {
-    const reward = formData.get(`reward-${i}`);
-
+    const reward = String(formData.get(`reward-${i}`) ?? "").trim();
+    const discountValue = Number(formData.get(`discountValue-${i}`));
+  
     if (reward) {
-      rewards.push(String(reward));
+      rewards.push({
+        reward,
+        discountType: "percentage",
+        discountValue,
+        position: i,
+      });
     }
   }
-
+  
   const campaign = await prisma.campaign.create({
     data: {
       shop: session.shop,
@@ -33,12 +39,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       placement: String(placement),
       status: String(status),
       rewardCount,
-  
       rewards: {
-        create: rewards.map((reward) => ({
-          reward,
-        })),
+        create: rewards,
       },
+
     },
   });
 
@@ -48,8 +52,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function NewCampaign() {
   const [game, setGame] = useState("spin");
   const [rewardCount, setRewardCount] = useState(3);
-  
   const [rewards, setRewards] = useState(["", "", ""]);
+  const [discountValues, setDiscountValues] = useState([10, 15, 20]);
   useEffect(() => {
     setRewards((currentRewards) => {
       if (currentRewards.length < rewardCount) {
@@ -61,7 +65,19 @@ export default function NewCampaign() {
   
       return currentRewards.slice(0, rewardCount);
     });
+  
+    setDiscountValues((currentValues) => {
+      if (currentValues.length < rewardCount) {
+        return [
+          ...currentValues,
+          ...Array(rewardCount - currentValues.length).fill(10),
+        ];
+      }
+  
+      return currentValues.slice(0, rewardCount);
+    });
   }, [rewardCount]);
+
   const rewardLimits = {
     spin: { min: 3, max: 5 },
     scratch: { min: 1, max: 1 },
@@ -69,6 +85,7 @@ export default function NewCampaign() {
     quiz: { min: 1, max: 1 },
   };
   const currentLimits = rewardLimits[game as keyof typeof rewardLimits];
+  
   return (
     
     <s-page heading="Create Campaign">
@@ -130,20 +147,35 @@ export default function NewCampaign() {
 
           <s-section heading="Reward Outcomes">
           <s-stack direction="block" gap="base">
-            {rewards.slice(0, rewardCount).map((reward, index) => (
-              <s-text-field
-                key={index}
-                name={`reward-${index}`}
-                label={`Reward ${index + 1}`}
-                value={reward}
-                onChange={(event) => {
-                const newRewards = [...rewards];
-                newRewards[index] = event.currentTarget.value;
-                setRewards(newRewards);
-              }}
-              />
-            ))}
             
+            {rewards.slice(0, rewardCount).map((reward, index) => (
+              <s-stack key={index} direction="block" gap="base">
+                <s-text-field
+                  name={`reward-${index}`}
+                  label={`Reward ${index + 1} label`}
+                  value={reward}
+                  onChange={(event) => {
+                    const newRewards = [...rewards];
+                    newRewards[index] = event.currentTarget.value;
+                    setRewards(newRewards);
+                  }}
+                />
+
+                <s-number-field
+                  name={`discountValue-${index}`}
+                  label="Discount value (%)"
+                  value={String(discountValues[index] ?? 10)}
+                  min={1}
+                  max={100}
+                  onChange={(event) => {
+                    const newValues = [...discountValues];
+                    newValues[index] = Number(event.currentTarget.value);
+                    setDiscountValues(newValues);
+                  }}
+                />
+              </s-stack>
+            ))}
+                        
           </s-stack>
           </s-section>
 

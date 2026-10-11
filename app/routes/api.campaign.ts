@@ -15,7 +15,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       createdAt: "desc",
     },
     include: {
-      rewards: true,
+      rewards: {
+        orderBy: {
+          position: "asc",
+        },
+      },
     },
     
   });

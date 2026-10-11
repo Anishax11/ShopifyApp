@@ -48,8 +48,13 @@ model Campaign {
 }
 
 model CampaignReward {
-  id         String   @id @default(cuid())
-  campaignId String
-  reward     String
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id            String   @id @default(cuid())
+  campaignId    String
+  reward        String
+  discountType  String   @default("percentage")
+  discountValue Float    @default(0)
+  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  position      Int
+
+  @@unique([campaignId, position])
 }
