@@ -14,35 +14,105 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const placement = formData.get("placement");
   const status = formData.get("status");
   const rewardCount = Number(formData.get("rewardCount"));
-  const rewards = [];
+  // Validate campaign details before writing to the database.
+  const campaignName = String(name ?? "").trim();
+  const campaignGame = String(game ?? "");
+  const campaignTheme = String(theme ?? "");
+  const campaignPlacement = String(placement ?? "");
+  const campaignStatus = String(status ?? "");
 
-  for (let i = 0; i < rewardCount; i++) {
-    const reward = String(formData.get(`reward-${i}`) ?? "").trim();
-    const discountValue = Number(formData.get(`discountValue-${i}`));
-  
-    if (reward) {
-      rewards.push({
-        reward,
-        discountType: "percentage",
-        discountValue,
-        position: i,
-      });
-    }
+  if (!campaignName || campaignName.length > 100) {
+    return Response.json(
+      { error: "Campaign name must be between 1 and 100 characters." },
+      { status: 400 },
+    );
   }
+
+  if (campaignGame !== "spin") {
+    return Response.json(
+      { error: "Unsupported game type." },
+      { status: 400 },
+    );
+  }
+
+  if (!campaignTheme || !campaignPlacement || !campaignStatus) {
+    return Response.json(
+      { error: "Theme, placement, and status are required." },
+      { status: 400 },
+    );
+  }
+
+  if (!Number.isInteger(rewardCount) || rewardCount < 2 || rewardCount > 5) {
+    return Response.json(
+      { error: "A wheel must have between 2 and 5 rewards." },
+      { status: 400 },
+    );
+  }
+  const rewards = [];
+  for (let i = 0; i < rewardCount; i++) {
+    const rawReward = formData.get(`reward-${i}`);
+    const rawDiscountValue = formData.get(`discountValue-${i}`);
+
+    const reward = String(rawReward ?? "").trim();
+
+    if (!reward || reward.length > 80) {
+      return Response.json(
+        {
+          error: `Reward ${i + 1} must have a label between 1 and 80 characters.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      typeof rawDiscountValue !== "string" ||
+      rawDiscountValue.trim() === ""
+    ) {
+      return Response.json(
+        { error: `Reward ${i + 1} is missing its discount value.` },
+        { status: 400 },
+      );
+    }
+
+    const discountValue = Number(rawDiscountValue);
+
+    if (
+      !Number.isFinite(discountValue) ||
+      discountValue < 0 ||
+      discountValue > 100 ||
+      (discountValue > 0 && discountValue < 1)
+    ) {
+      return Response.json(
+        {
+          error: `Reward ${i + 1} must have a discount value of 0 or between 1 and 100.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    rewards.push({
+      reward,
+      discountType: "percentage",
+      discountValue,
+      position: i,
+    });
+  }
+
+  
+  
   
   const campaign = await prisma.campaign.create({
     data: {
       shop: session.shop,
-      name: String(name),
-      game: String(game),
-      theme: String(theme),
-      placement: String(placement),
-      status: String(status),
+      name: campaignName,
+      game: campaignGame,
+      theme: campaignTheme,
+      placement: campaignPlacement,
+      status: campaignStatus,
       rewardCount,
       rewards: {
         create: rewards,
       },
-
     },
   });
 
