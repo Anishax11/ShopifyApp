@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -39,6 +39,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
   });
 
+  
   if (!campaign || campaign.rewards.length === 0) {
     return Response.json(
       { error: "No active wheel campaign found" },
@@ -46,9 +47,49 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  // Validate the saved campaign configuration before issuing a reward.
+  const validRewardCount =
+    Number.isInteger(campaign.rewardCount) &&
+    campaign.rewardCount >= 2 &&
+    campaign.rewardCount <= 12;
+
+  const validRewardConfiguration =
+    validRewardCount &&
+    campaign.rewards.length === campaign.rewardCount &&
+    campaign.rewards.every((reward, index) => {
+      const validLabel =
+        typeof reward.reward === "string" &&
+        reward.reward.trim().length > 0 &&
+        reward.reward.length <= 80;
+
+      const validPosition = reward.position === index;
+
+      const validDiscount =
+        reward.discountType === "percentage" &&
+        Number.isFinite(reward.discountValue) &&
+        (
+          reward.discountValue === 0 ||
+          (
+            reward.discountValue >= 1 &&
+            reward.discountValue <= 100
+          )
+        );
+
+      return validLabel && validPosition && validDiscount;
+    });
+
+  if (!validRewardConfiguration) {
+    console.error("Invalid reward configuration for campaign:", campaign.id);
+
+    return Response.json(
+      { error: "This campaign has an invalid reward configuration." },
+      { status: 422 },
+    );
+  }
+
+
   // The server chooses the winning reward.
-  const winningIndex = randomBytes(4).readUInt32BE(0)
-    % campaign.rewards.length;
+  const winningIndex = randomInt(0, campaign.rewards.length);
 
   const winningReward = campaign.rewards[winningIndex];
 
