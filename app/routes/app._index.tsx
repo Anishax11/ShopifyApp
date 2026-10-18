@@ -12,20 +12,84 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Link } from "react-router";
 import NewCampaign from "./app.campaigns.new";
 
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  const campaigns = await prisma.campaign.findMany({
-    where: {
-      shop: session.shop,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const [campaigns, spins] = await Promise.all([
+    prisma.campaign.findMany({
+      where: {
+        shop: session.shop,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    }),
 
-  return { campaigns };
+    prisma.spin.findMany({
+      where: {
+        shop: session.shop,
+      },
+      select: {
+        status: true,
+        campaignId: true,
+        reward: {
+          select: {
+            reward: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  const analytics = {
+    totalSpins: spins.length,
+    discountsIssued: spins.filter(
+      (spin) => spin.status === "issued",
+    ).length,
+    noDiscountSpins: spins.filter(
+      (spin) => spin.status === "no_discount",
+    ).length,
+    unresolvedSpins: spins.filter(
+      (spin) =>
+        spin.status === "pending" ||
+        spin.status === "recovery_required",
+    ).length,
+    failedSpins: spins.filter(
+      (spin) => spin.status === "failed",
+    ).length,
+  };
+
+  const rewardCounts = new Map<
+    string,
+    { reward: string; count: number }
+  >();
+
+  for (const spin of spins) {
+    const key = `${spin.campaignId}:${spin.reward.reward}`;
+    const existing = rewardCounts.get(key);
+
+    if (existing) {
+      existing.count += 1;
+    } else {
+      rewardCounts.set(key, {
+        reward: spin.reward.reward,
+        count: 1,
+      });
+    }
+  }
+
+  const rewardBreakdown = Array.from(rewardCounts.values()).sort(
+    (a, b) => b.count - a.count,
+  );
+
+  return {
+    campaigns,
+    analytics,
+    rewardBreakdown,
+  };
 };
+
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -141,8 +205,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Index() {
   const fetcher = useFetcher<typeof action>();
-  const { campaigns } = useLoaderData<typeof loader>();
-
+  const { campaigns, analytics, rewardBreakdown } =
+  useLoaderData<typeof loader>();
   const shopify = useAppBridge();
   const isLoading =
     ["loading", "submitting"].includes(fetcher.state) &&
@@ -168,7 +232,61 @@ export default function Index() {
         Create interactive seasonal campaigns that engage your customers and
         unlock special rewards.
       </s-paragraph>
+            
+      <s-section heading="Campaign Analytics">
+        <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="base">
+          <s-box border="base" padding="base" borderRadius="base">
+            <s-heading>Total spins</s-heading>
+            <s-heading>{analytics.totalSpins}</s-heading>
+          </s-box>
+
+          <s-box border="base" padding="base" borderRadius="base">
+            <s-heading>Discounts issued</s-heading>
+            <s-heading>{analytics.discountsIssued}</s-heading>
+          </s-box>
+
+          <s-box border="base" padding="base" borderRadius="base">
+            <s-heading>No-discount outcomes</s-heading>
+            <s-heading>{analytics.noDiscountSpins}</s-heading>
+          </s-box>
+
+          <s-box border="base" padding="base" borderRadius="base">
+            <s-heading>Needs attention</s-heading>
+            <s-heading>
+              {analytics.unresolvedSpins + analytics.failedSpins}
+            </s-heading>
+          </s-box>
+        </s-grid>
+
+        <s-heading>Rewards won</s-heading>
+
+        {rewardBreakdown.length === 0 ? (
+          <s-paragraph>
+            No spins recorded yet. Analytics will appear when customers start playing.
+          </s-paragraph>
+        ) : (
+          rewardBreakdown.map((item) => (
+            <s-paragraph key={item.reward}>
+              {item.reward}: {item.count} spins
+            </s-paragraph>
+          ))
+        )}
+
+        {analytics.unresolvedSpins > 0 && (
+          <s-paragraph>
+            {analytics.unresolvedSpins} spin(s) are pending or need verification.
+          </s-paragraph>
+        )}
+
+        {analytics.failedSpins > 0 && (
+          <s-paragraph>
+            {analytics.failedSpins} spin(s) failed.
+          </s-paragraph>
+        )}
       </s-section>
+
+      </s-section>
+
       <s-section heading="Your Campaigns">
         <s-stack direction="block" gap="small">
           <s-paragraph>

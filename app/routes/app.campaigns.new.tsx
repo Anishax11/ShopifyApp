@@ -35,9 +35,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  if (!campaignTheme || !campaignPlacement || !campaignStatus) {
+  if (!campaignTheme || !campaignPlacement) {
     return Response.json(
-      { error: "Theme, placement, and status are required." },
+      { error: "Theme and placement are required." },
+      { status: 400 },
+    );
+  }
+  
+  if (!["draft", "active"].includes(campaignStatus)) {
+    return Response.json(
+      { error: "Status must be either draft or active." },
       { status: 400 },
     );
   }
@@ -101,19 +108,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   
   
   
-  const campaign = await prisma.campaign.create({
-    data: {
-      shop: session.shop,
-      name: campaignName,
-      game: campaignGame,
-      theme: campaignTheme,
-      placement: campaignPlacement,
-      status: campaignStatus,
-      rewardCount,
-      rewards: {
-        create: rewards,
+  const campaign = await prisma.$transaction(async (tx) => {
+    // Only one active Spin campaign per shop.
+    if (campaignStatus === "active") {
+      await tx.campaign.updateMany({
+        where: {
+          shop: session.shop,
+          game: "spin",
+          status: "active",
+        },
+        data: {
+          status: "draft",
+        },
+      });
+    }
+  
+    // Create the campaign and its rewards together.
+    return tx.campaign.create({
+      data: {
+        shop: session.shop,
+        name: campaignName,
+        game: campaignGame,
+        theme: campaignTheme,
+        placement: campaignPlacement,
+        status: campaignStatus,
+        rewardCount,
+        rewards: {
+          create: rewards,
+        },
       },
-    },
+    });
   });
 
   return { success: true, campaign };

@@ -190,7 +190,6 @@
         }
     
         const data = await response.json();
-        console.log("Fetched data : ",data);
     
         if (!data.campaign || !data.campaign.rewards.length) {
             wheel.replaceChildren();
@@ -241,9 +240,6 @@
       label.textContent = reward;
       const start = 270 + index * sliceAngle;
       const angle = start + sliceAngle/2;
-      console.log("reward ",reward);
-      console.log("angle ",angle);
-    
       const radius = Math.min(55, 150 * Math.sin(Math.PI / rewards.length) * 0.65);
 
       label.style.transform =
@@ -253,27 +249,38 @@
       });
     }
     
-    
+let pendingSpinKey = null;
+
 spinButton.addEventListener("click", async () => {
   if (spinning || rewards.length === 0) return;
 
   spinning = true;
   spinButton.disabled = true;
+  
 
   try {
     // Ask the backend to choose the winning reward.
+    // Reuse the same key if this request needs to be retried.
+    if (!pendingSpinKey) {
+      pendingSpinKey = crypto.randomUUID();
+    }
+
     const response = await fetch("/apps/seasonal-games/discount", {
       method: "POST",
       headers: {
         "Accept": "application/json",
+        "Idempotency-Key": pendingSpinKey,
       },
     });
 
     const result = await response.json();
+    
 
     if (!response.ok) {
       throw new Error(result.error || "Could not process your spin.");
     }
+    // The server returned a valid outcome for this request.
+    
 
     const winningIndex = result.position;
 
@@ -285,6 +292,8 @@ spinButton.addEventListener("click", async () => {
       throw new Error("The server returned an invalid reward position.");
     }
 
+    pendingSpinKey = null;
+
     // Keep your existing, working rotation formula.
     const sliceAngle = 360 / rewards.length;
     const extraSpins = 4;
@@ -294,8 +303,6 @@ spinButton.addEventListener("click", async () => {
       (sliceAngle / 2);
 
     currentRotation = extraSpins * 360 + targetAngle;
-
-    console.log("Rotate by:", currentRotation);
 
     wheel.style.transition = "transform 4s ease-out";
     wheel.style.transform = `rotate(${currentRotation}deg)`;

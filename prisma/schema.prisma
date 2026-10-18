@@ -45,6 +45,7 @@ model Campaign {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   rewards     CampaignReward[]
+  spins       Spin[]
 }
 
 model CampaignReward {
@@ -55,6 +56,48 @@ model CampaignReward {
   discountValue Float    @default(0)
   campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   position      Int
+  spins         Spin[]
 
   @@unique([campaignId, position])
+  
+}
+
+
+model Spin {
+  id                    String   @id @default(cuid())
+  shop                  String
+  campaignId            String
+  campaignRewardId      String
+  idempotencyKey        String?
+
+  status                String   @default("pending")
+  discountCode          String?  @unique
+  shopifyDiscountId     String?
+  error                 String?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  requestedDiscountCode String? @unique
+
+  
+campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+reward CampaignReward @relation(fields: [campaignRewardId], references: [id], onDelete: Restrict)
+
+  @@index([shop, createdAt])
+  @@index([campaignId, status])
+  @@unique([shop, idempotencyKey])
+  
+
+}
+
+
+model SpinRateLimit {
+  id          String   @id @default(cuid())
+  shop        String
+  windowStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shop, windowStart])
+  @@index([windowStart])
 }

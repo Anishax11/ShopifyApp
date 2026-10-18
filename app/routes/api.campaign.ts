@@ -10,6 +10,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: {
       shop: session.shop,
       status: "active",
+      game: "spin",
     },
     orderBy: {
       createdAt: "desc",
