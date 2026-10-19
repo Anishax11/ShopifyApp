@@ -1243,15 +1243,41 @@
     currentRotation = 0;
   }
 
-  copyButton.addEventListener("click", async () => {
-    if (!lastCode) return;
+  
+copyButton.addEventListener("click", async () => {
+  if (!lastCode) return;
+  try {
+    await navigator.clipboard.writeText(lastCode);
+    copyButton.textContent = "Copied";
+  } catch (error) {
+    console.error("Clipboard API failed:", error);
+
+    const textArea = document.createElement("textarea");
+    textArea.value = lastCode;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+
+    document.body.appendChild(textArea);
+    textArea.select();
+
     try {
-      await navigator.clipboard.writeText(lastCode);
+      const success = document.execCommand("copy");
+
+      if (!success) {
+        throw new Error("Fallback copy was unsuccessful");
+      }
+
       copyButton.textContent = "Copied";
-    } catch (error) {
+    } catch (fallbackError) {
+      console.error("Fallback copy failed:", fallbackError);
       copyButton.textContent = "Copy failed";
+    } finally {
+      textArea.remove();
     }
-  });
+  }
+});
+
 
   closeButton.addEventListener("click", () => {
     hideResult();
