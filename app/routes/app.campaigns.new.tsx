@@ -41,7 +41,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 400 },
     );
   }
-  
+  if (!["inline", "popup", "banner"].includes(campaignPlacement)) {
+    return Response.json(
+      { error: "Placement must be inline, popup, or banner." },
+      { status: 400 },
+    );
+  }
+
   if (!["draft", "active"].includes(campaignStatus)) {
     return Response.json(
       { error: "Status must be either draft or active." },

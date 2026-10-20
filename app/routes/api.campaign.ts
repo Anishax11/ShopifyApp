@@ -29,13 +29,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return Response.json({ campaign: null });
   }
   
-
+  const ALLOWED_PLACEMENTS = ["inline", "popup", "banner"];
   return Response.json({
     campaign: {
       id: campaign.id,
       name: campaign.name,
       game: campaign.game,
       theme: campaign.theme,
+      placement: campaign.placement || "inline",
       rewards: campaign.rewards.map((reward) => reward.reward),
     },
   });

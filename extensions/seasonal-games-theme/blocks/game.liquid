@@ -1,57 +1,63 @@
+{%- assign sg_w = block.settings.inline_width | default: 100 -%}
+{%- assign sg_h = block.settings.inline_height | default: 0 -%}
 <div
   class="seasonal-game"
   id="seasonal-game-{{ block.id }}"
   data-theme="none"
+  data-display-mode="inline"
+  {% if sg_h > 0 %}data-fixed-height="true"{% endif %}
 >
-  <div class="sg-atmosphere" aria-hidden="true"></div>
-  <div class="sg-vignette" aria-hidden="true"></div>
+  <div class="sg-game-content">
+    <div class="sg-atmosphere" aria-hidden="true"></div>
+    <div class="sg-vignette" aria-hidden="true"></div>
 
-  <div class="sg-header">
-    <p class="sg-badge">Seasonal Games</p>
-    <h2>Spin &amp; Win!</h2>
-    <p class="sg-subtitle">Spin the wheel to reveal your reward.</p>
-  </div>
-
-  <div class="wheel-container">
-    <div class="wheel-halo" aria-hidden="true"></div>
-    <div class="wheel-ornaments" aria-hidden="true"></div>
-    <div class="pointer" aria-hidden="true">
-      <span class="pointer-glow"></span>
-      <span class="pointer-art"></span>
+    <div class="sg-header">
+      <p class="sg-badge">Seasonal Games</p>
+      <h2>Spin &amp; Win!</h2>
+      <p class="sg-subtitle">Spin the wheel to reveal your reward.</p>
     </div>
-    <div class="wheel"></div>
-    <div class="wheel-hub" aria-hidden="true"></div>
-  </div>
 
-  <button type="button" class="spin-button">
-    <span class="spin-button-icon" aria-hidden="true"></span>
-    <span class="spin-button-label">SPIN</span>
-  </button>
-
-  <div class="sg-result" hidden>
-    <div class="sg-result-backdrop"></div>
-    <div
-      class="sg-result-card"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="sg-result-title-{{ block.id }}"
-    >
-      <div class="sg-result-fx" aria-hidden="true"></div>
-      <p class="sg-result-eyebrow"></p>
-      <h3 id="sg-result-title-{{ block.id }}" class="sg-result-title"></h3>
-      <p class="sg-result-reward"></p>
-      <div class="sg-result-code" hidden>
-        <span class="sg-result-code-label">Your discount code</span>
-        <div class="sg-result-code-row">
-          <code class="sg-result-code-value"></code>
-          <button type="button" class="sg-copy">Copy</button>
-        </div>
+    <div class="wheel-container">
+      <div class="wheel-halo" aria-hidden="true"></div>
+      <div class="wheel-ornaments" aria-hidden="true"></div>
+      <div class="pointer" aria-hidden="true">
+        <span class="pointer-glow"></span>
+        <span class="pointer-art"></span>
       </div>
-      <p class="sg-result-hint"></p>
-      <button type="button" class="sg-result-close">Spin again</button>
+      <div class="wheel"></div>
+      <div class="wheel-hub" aria-hidden="true"></div>
+    </div>
+
+    <button type="button" class="spin-button">
+      <span class="spin-button-icon" aria-hidden="true"></span>
+      <span class="spin-button-label">SPIN</span>
+    </button>
+
+    <div class="sg-result" hidden>
+      <div class="sg-result-backdrop"></div>
+      <div
+        class="sg-result-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sg-result-title-{{ block.id }}"
+      >
+        <div class="sg-result-fx" aria-hidden="true"></div>
+        <p class="sg-result-eyebrow"></p>
+        <h3 id="sg-result-title-{{ block.id }}" class="sg-result-title"></h3>
+        <p class="sg-result-reward"></p>
+        <div class="sg-result-code" hidden>
+          <span class="sg-result-code-label">Your discount code</span>
+          <div class="sg-result-code-row">
+            <code class="sg-result-code-value"></code>
+            <button type="button" class="sg-copy">Copy</button>
+          </div>
+        </div>
+        <p class="sg-result-hint"></p>
+        <button type="button" class="sg-result-close">Spin again</button>
+      </div>
     </div>
   </div>
-</div>
+ </div>
 
 <style>
 .seasonal-game {
@@ -115,12 +121,15 @@
   overflow: hidden;
 }
 
-.seasonal-game > .sg-header,
-.seasonal-game > .wheel-container,
-.seasonal-game > .spin-button,
-.seasonal-game > .sg-result {
+.seasonal-game .sg-header,
+.seasonal-game .wheel-container,
+.seasonal-game .spin-button {
   position: relative;
   z-index: 2;
+}
+
+.seasonal-game .sg-result {
+  z-index: 8;
 }
 
 .sg-header h2 {
@@ -857,12 +866,312 @@
     transition: none !important;
   }
 }
+
+/* =========================================
+   SEASONAL GAME PLACEMENT STYLES
+   ========================================= */
+
+/* Popup backdrop */
+.sg-placement-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.sg-placement-overlay[hidden] {
+  display: none;
+}
+
+
+/* Close button */
+.sg-placement-close {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 2147483001;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  color: #fff;
+  background: #25212f;
+  font: 28px/1 sans-serif;
+  cursor: pointer;
+}
+
+.sg-placement-close:focus-visible,
+.sg-banner-button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
+/* Popup dimensions controlled by theme settings */
+.sg-placement-overlay > .seasonal-game.sg-popup-game {
+  position: relative;
+  box-sizing: border-box;
+  width: min({{ block.settings.popup_width | default: 85 }}vw, 100vw);
+  height: min({{ block.settings.popup_height | default: 90 }}vh, 100vh);
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 12px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+/* Inner content stays centered */
+/* The wrapper has a stable natural width; JS scales it to fit. */
+.sg-placement-overlay .sg-game-content {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 460px;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  transform-origin: center center;
+}
+
+/* Promotional banner */
+.sg-placement-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2147482000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 14px 18px;
+  color: #fff;
+  background: #21172f;
+  border-bottom: 2px solid #e8b86d;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.2);
+  font: 600 15px/1.4 "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+.sg-banner-text {
+  margin: 0;
+}
+
+.sg-banner-button {
+  flex: 0 0 auto;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 999px;
+  color: #21172f;
+  background: #e8b86d;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* Inline placement: card fills the section by default, size is customisable */
+.seasonal-game:not(.sg-popup-game) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: {{ sg_w }}%;
+  max-width: 100%;              
+  margin-left: auto;
+  margin-right: auto;
+  border-radius: 0;
+  {% if sg_h > 0 %}height: {{ sg_h }}vh;{% endif %}
+}
+
+/* The game itself stays a readable size, centred inside the wide card */
+.seasonal-game:not(.sg-popup-game) .sg-game-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 460px;
+  min-width: 0;
+  margin: 0 auto;
+}
+
+/* Mobile layout */
+@media (max-width: 480px) {
+  .sg-placement-close {
+    top: 8px;
+    right: 8px;
+  }
+
+  .sg-placement-banner {
+    gap: 10px;
+    padding: 12px;
+    font-size: 13px;
+  }
+
+  .sg-banner-button {
+    padding: 9px 12px;
+  }
+
+  .seasonal-game:not(.sg-popup-game) {
+    padding: 24px 12px;
+  }
+
+  .sg-placement-overlay .seasonal-game.sg-popup-game {
+    padding: 8px;
+  }
+}
+
 </style>
 
 <script>
 (() => {
   const root = document.getElementById("seasonal-game-{{ block.id }}");
   if (!root) return;
+  
+  // Placement UI: campaign placement comes from the API.
+  const placementAnchor = document.createComment("Seasonal Games placement");
+  const placementParent = root.parentNode;
+
+  let placementOverlay = null;
+  let placementBanner = null;
+  let placementCloseButton = null;
+  let popupTimer = null;
+  let previousBodyOverflow = "";
+
+  function setupPlacement(rawPlacement) {
+  const allowedPlacements = ["inline", "popup", "banner"];
+  const placement = allowedPlacements.includes(rawPlacement)
+    ? rawPlacement
+    : "inline";
+
+  root.dataset.displayMode = placement;
+
+  // Inline placement stays where the merchant added the theme block.
+  if (placement === "inline") return;
+
+  // Preserve the block's original location in the theme.
+  placementParent.insertBefore(placementAnchor, root);
+  root.classList.add("sg-popup-game");
+
+  // Create the shared modal for popup and banner placement.
+  placementOverlay = document.createElement("div");
+  placementOverlay.className = "sg-placement-overlay";
+  placementOverlay.hidden = true;
+  placementOverlay.setAttribute("role", "dialog");
+  placementOverlay.setAttribute("aria-modal", "true");
+  placementOverlay.setAttribute("aria-label", "Spin and win game");
+
+  placementCloseButton = document.createElement("button");
+  placementCloseButton.type = "button";
+  placementCloseButton.className = "sg-placement-close";
+  placementCloseButton.setAttribute("aria-label", "Close spin game");
+  placementCloseButton.textContent = "×";
+
+  placementOverlay.appendChild(placementCloseButton);
+  placementOverlay.appendChild(root);
+  document.body.appendChild(placementOverlay);
+
+  const gameContent = root.querySelector(".sg-game-content");
+
+  // Scale the whole game uniformly, keeping the wheel and Spin button visible.
+  function resizePoster() {
+    if (!gameContent || placementOverlay.hidden) return;
+
+    // Clear the old transform before measuring the natural content dimensions.
+    gameContent.style.transform = "none";
+
+    const naturalWidth = gameContent.offsetWidth;
+    const naturalHeight = gameContent.offsetHeight;
+
+    // Root has 12px padding on each side.
+    const availableWidth = root.clientWidth - 24;
+    const availableHeight = root.clientHeight - 24;
+
+    if (
+      naturalWidth <= 0 ||
+      naturalHeight <= 0 ||
+      availableWidth <= 0 ||
+      availableHeight <= 0
+    ) {
+      return;
+    }
+
+    const scale = Math.min(
+      availableWidth / naturalWidth,
+      availableHeight / naturalHeight
+    );
+
+    gameContent.style.transform =
+      `translate(-50%, -50%) scale(${scale})`;
+  }
+
+  // Recalculate when the popup's dimensions change.
+  if (gameContent && typeof ResizeObserver !== "undefined") {
+    const posterObserver = new ResizeObserver(() => {
+      resizePoster();
+    });
+
+    posterObserver.observe(root);
+  }
+
+  function closePlacement() {
+    placementOverlay.hidden = true;
+    document.body.style.overflow = previousBodyOverflow;
+  }
+
+  function openPlacement() {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    placementOverlay.hidden = false;
+
+    // Wait for the visible modal to have layout dimensions before measuring.
+    requestAnimationFrame(() => {
+      resizePoster();
+      placementCloseButton.focus();
+    });
+  }
+
+  placementCloseButton.addEventListener("click", closePlacement);
+
+  placementOverlay.addEventListener("click", (event) => {
+    if (event.target === placementOverlay) {
+      closePlacement();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !placementOverlay.hidden) {
+      closePlacement();
+    }
+  });
+
+  if (placement === "popup") {
+    // Automatically open three seconds after the campaign loads.
+    popupTimer = window.setTimeout(openPlacement, 3000);
+    return;
+  }
+
+  // Banner placement: visitors open the game by clicking the CTA.
+  placementBanner = document.createElement("div");
+  placementBanner.className = "sg-placement-banner";
+
+  const bannerText = document.createElement("p");
+  bannerText.className = "sg-banner-text";
+  bannerText.textContent =
+    "Feeling lucky? Spin to reveal your reward!";
+
+  const bannerButton = document.createElement("button");
+  bannerButton.type = "button";
+  bannerButton.className = "sg-banner-button";
+  bannerButton.textContent = "Play now";
+  bannerButton.addEventListener("click", openPlacement);
+
+  placementBanner.append(bannerText, bannerButton);
+  document.body.appendChild(placementBanner);
+}
 
   const wheel = root.querySelector(".wheel");
   const spinButton = root.querySelector(".spin-button");
@@ -1135,6 +1444,21 @@
     wheel.appendChild(empty);
     spinButton.disabled = true;
   }
+  function fitInline() {
+  if (root.classList.contains("sg-popup-game")) return;
+  const content = root.querySelector(".sg-game-content");
+  if (!content) return;
+
+  content.style.transform = "";
+  if (!root.hasAttribute("data-fixed-height")) return;
+
+  const cs = getComputedStyle(root);
+  const availH =
+    root.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const scale = Math.min(1, availH / content.offsetHeight);
+
+  if (scale < 1) content.style.transform = `scale(${scale})`;
+}
 
   async function loadCampaign() {
     try {
@@ -1148,6 +1472,14 @@
       applyTheme(data.campaign.theme);
       rewards = data.campaign.rewards;
       buildWheel();
+      const placement = ["inline", "popup", "banner"].includes(
+      data.campaign.placement
+    )
+      ? data.campaign.placement
+      : "inline";
+
+    setupPlacement(placement);
+    fitInline();
     } catch (error) {
       showEmpty("No active campaigns");
     }
@@ -1345,16 +1677,70 @@ copyButton.addEventListener("click", async () => {
       });
     }
   });
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(fitInline).observe(root);
+  }
+  window.addEventListener("resize", fitInline);
 
   applyTheme("none");
   loadCampaign();
 })();
 </script>
 
+
 {% schema %}
 {
   "name": "Seasonal Game",
   "target": "section",
-  "settings": []
+  "settings": [
+    {
+      "type": "header",
+      "content": "Popup / banner"
+    },
+    {
+      "type": "range",
+      "id": "popup_width",
+      "label": "Popup width (% of screen)",
+      "min": 50,
+      "max": 100,
+      "step": 5,
+      "default": 85,
+      "unit": "%"
+    },
+    {
+      "type": "range",
+      "id": "popup_height",
+      "label": "Popup height (% of screen)",
+      "min": 50,
+      "max": 100,
+      "step": 5,
+      "default": 90,
+      "unit": "%"
+    },
+    {
+      "type": "header",
+      "content": "Inline"
+    },
+    {
+      "type": "range",
+      "id": "inline_width",
+      "label": "Inline game width (% of section)",
+      "min": 20,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "unit": "%"
+    },
+    {
+      "type": "range",
+      "id": "inline_height",
+      "label": "Inline game min height (% of viewport, 0 = auto)",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 0,
+      "unit": "%"
+    }
+  ]
 }
 {% endschema %}
