@@ -1,17 +1,28 @@
 import { useState } from "react";
 import { Form } from "react-router";
 import {
+  COOLDOWN_OPTIONS,
   DEFAULT_DISCOUNTS,
+  DEVICES,
+  EXIT_INTENT_MOBILE_FALLBACK_SECONDS,
+  FREQUENCIES,
+  LEGACY_PLAY_LIMIT,
   MAX_REWARDS,
   MIN_REWARDS,
   PLACEMENTS,
+  PLAY_LIMITS,
+  SCROLL_DEPTH_RANGE,
+  SETTING_DEFAULTS_NEW,
   STATUSES,
   THEMES,
+  TRIGGERS,
+  TRIGGER_DELAY_RANGE,
   rewardLabel,
 } from "../utils/campaign";
+import type { CampaignSettings } from "../utils/campaign";
 import type { FormErrors } from "../models/campaign.server";
 
-export type CampaignFormValues = {
+export type CampaignFormValues = CampaignSettings & {
   name: string;
   theme: string;
   placement: string;
@@ -25,6 +36,7 @@ export const emptyCampaign: CampaignFormValues = {
   placement: "popup",
   status: "draft",
   discountValues: DEFAULT_DISCOUNTS.slice(0, 3),
+  ...SETTING_DEFAULTS_NEW,
 };
 
 type Props = {
@@ -44,6 +56,13 @@ export function CampaignForm({
   const [theme, setTheme] = useState(initial.theme);
   const [placement, setPlacement] = useState(initial.placement);
   const [status, setStatus] = useState(initial.status);
+  const [triggerType, setTriggerType] = useState(initial.triggerType);
+  const [triggerDelay, setTriggerDelay] = useState(initial.triggerDelaySeconds);
+  const [scrollDepth, setScrollDepth] = useState(initial.scrollDepthPercent);
+  const [frequency, setFrequency] = useState(initial.displayFrequency);
+  const [cooldown, setCooldown] = useState(initial.cooldownDays);
+  const [playLimit, setPlayLimit] = useState(initial.playLimit);
+  const [device, setDevice] = useState(initial.deviceTarget);
   const [rewardCount, setRewardCount] = useState(initial.discountValues.length);
   // Always keep MAX_REWARDS slots so changing the count never loses values.
   const [discounts, setDiscounts] = useState<number[]>(() =>
@@ -54,12 +73,31 @@ export function CampaignForm({
   );
 
   const visible = discounts.slice(0, rewardCount);
-  const hasFieldErrors = Boolean(errors?.name || errors?.rewards);
+  const hasFieldErrors = Boolean(
+    errors?.name ||
+      errors?.rewards ||
+      errors?.triggerDelaySeconds ||
+      errors?.scrollDepthPercent,
+  );
+  // Triggers and display frequency only apply to popup and banner placements.
+  const isOverlay = placement !== "inline";
+  const playLimitOptions =
+    initial.playLimit === LEGACY_PLAY_LIMIT.value
+      ? [...PLAY_LIMITS, LEGACY_PLAY_LIMIT]
+      : PLAY_LIMITS;
 
   return (
     <Form method="post">
       <input type="hidden" name="intent" value="save" />
       <input type="hidden" name="game" value="spin" />
+      {/* Always submit current values, even when a control is hidden. */}
+      <input type="hidden" name="triggerType" value={triggerType} />
+      <input type="hidden" name="triggerDelaySeconds" value={triggerDelay} />
+      <input type="hidden" name="scrollDepthPercent" value={scrollDepth} />
+      <input type="hidden" name="displayFrequency" value={frequency} />
+      <input type="hidden" name="cooldownDays" value={cooldown} />
+      <input type="hidden" name="playLimit" value={playLimit} />
+      <input type="hidden" name="deviceTarget" value={device} />
 
       <s-stack direction="block" gap="base">
         {errors?.form && (
@@ -182,6 +220,118 @@ export function CampaignForm({
               {STATUSES.map((s) => (
                 <s-option key={s.value} value={s.value}>
                   {s.label}
+                </s-option>
+              ))}
+            </s-select>
+          </s-stack>
+        </s-section>
+
+        {isOverlay && (
+          <s-section heading="When it appears">
+            <s-stack direction="block" gap="base">
+              <s-select
+                label="Trigger"
+                value={triggerType}
+                onChange={(e: any) => setTriggerType(e.currentTarget.value)}
+              >
+                {TRIGGERS.map((t) => (
+                  <s-option key={t.value} value={t.value}>
+                    {t.label}
+                  </s-option>
+                ))}
+              </s-select>
+
+              {triggerType === "time_delay" && (
+                <s-number-field
+                  label="Show after (seconds)"
+                  min={TRIGGER_DELAY_RANGE.min}
+                  max={TRIGGER_DELAY_RANGE.max}
+                  value={String(triggerDelay)}
+                  error={errors?.triggerDelaySeconds}
+                  onInput={(e: any) =>
+                    setTriggerDelay(Number(e.currentTarget.value))
+                  }
+                />
+              )}
+
+              {triggerType === "scroll_depth" && (
+                <s-number-field
+                  label="Show after scrolling (% of page)"
+                  min={SCROLL_DEPTH_RANGE.min}
+                  max={SCROLL_DEPTH_RANGE.max}
+                  value={String(scrollDepth)}
+                  error={errors?.scrollDepthPercent}
+                  details="Very short pages that can't scroll show it after 15 seconds."
+                  onInput={(e: any) =>
+                    setScrollDepth(Number(e.currentTarget.value))
+                  }
+                />
+              )}
+
+              {triggerType === "exit_intent" && (
+                <s-banner tone="info">
+                  <s-paragraph>
+                    Detected when a desktop visitor moves the mouse out of the
+                    top of the page. Touch devices have no exit signal, so they
+                    see it after {EXIT_INTENT_MOBILE_FALLBACK_SECONDS} seconds
+                    instead. Choose “Desktop only” below to skip them.
+                  </s-paragraph>
+                </s-banner>
+              )}
+
+              <s-select
+                label="Display frequency"
+                value={frequency}
+                details="Closing a popup also stops it reopening for the rest of that session."
+                onChange={(e: any) => setFrequency(e.currentTarget.value)}
+              >
+                {FREQUENCIES.map((f) => (
+                  <s-option key={f.value} value={f.value}>
+                    {f.label}
+                  </s-option>
+                ))}
+              </s-select>
+
+              {frequency === "once_per_visitor" && (
+                <s-select
+                  label="Cooldown"
+                  value={String(cooldown)}
+                  onChange={(e: any) => setCooldown(Number(e.currentTarget.value))}
+                >
+                  {COOLDOWN_OPTIONS.map((d) => (
+                    <s-option key={d} value={String(d)}>
+                      {d === 1 ? "1 day" : `${d} days`}
+                    </s-option>
+                  ))}
+                </s-select>
+              )}
+            </s-stack>
+          </s-section>
+        )}
+
+        <s-section heading="Play limits & devices">
+          <s-stack direction="block" gap="base">
+            <s-select
+              label="Play limit"
+              value={playLimit}
+              details="Checked on the server. Visitors are recognised by browser storage, or by their account when logged in, so clearing storage or switching device can reset an anonymous visitor."
+              onChange={(e: any) => setPlayLimit(e.currentTarget.value)}
+            >
+              {playLimitOptions.map((p) => (
+                <s-option key={p.value} value={p.value}>
+                  {p.label}
+                </s-option>
+              ))}
+            </s-select>
+
+            <s-select
+              label="Show on"
+              value={device}
+              onChange={(e: any) => setDevice(e.currentTarget.value)}
+            >
+              {DEVICES.map((d) => (
+                <s-option key={d.value} value={d.value}>
+                  {d.label}
                 </s-option>
               ))}
             </s-select>

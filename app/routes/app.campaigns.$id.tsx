@@ -40,6 +40,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       theme: campaign.theme,
       placement: campaign.placement,
       status: campaign.status,
+      triggerType: campaign.triggerType,
+      triggerDelaySeconds: campaign.triggerDelaySeconds,
+      scrollDepthPercent: campaign.scrollDepthPercent,
+      displayFrequency: campaign.displayFrequency,
+      cooldownDays: campaign.cooldownDays,
+      playLimit: campaign.playLimit,
+      deviceTarget: campaign.deviceTarget,
       discountValues: campaign.rewards.map((r) => Number(r.discountValue)),
     },
   };

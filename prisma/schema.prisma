@@ -46,6 +46,14 @@ model Campaign {
   updatedAt   DateTime @updatedAt
   rewards     CampaignReward[]
   spins       Spin[]
+  triggerType         String @default("time_delay")   // time_delay | exit_intent | scroll_depth
+  triggerDelaySeconds Int    @default(3)
+  scrollDepthPercent  Int    @default(50)
+  displayFrequency    String @default("every_visit")  // every_visit | once_per_session | once_per_visitor
+  cooldownDays        Int    @default(7)              // 1 | 7 | 30
+  playLimit           String @default("unlimited")    // unlimited (legacy) | per_session | per_visitor
+  deviceTarget        String @default("all")          // all | desktop | mobile
+
 }
 
 model CampaignReward {
@@ -78,6 +86,10 @@ model Spin {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   requestedDiscountCode String? @unique
+  visitorId  String?   // anonymous browser ID (client supplied)
+  sessionId  String?   // anonymous session ID (client supplied)
+  customerId String?   // logged-in customer, from the signed app-proxy request
+  playKey    String?   @unique   // enforces one play per visitor/session; cleared when a spin fails
 
   
 campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -86,6 +98,9 @@ reward CampaignReward @relation(fields: [campaignRewardId], references: [id], on
   @@index([shop, createdAt])
   @@index([campaignId, status])
   @@unique([shop, idempotencyKey])
+  @@index([campaignId, visitorId])
+  @@index([campaignId, sessionId])
+  @@index([campaignId, customerId])
   
 
 }
@@ -101,3 +116,8 @@ model SpinRateLimit {
   @@unique([shop, windowStart])
   @@index([windowStart])
 }
+
+
+
+
+  

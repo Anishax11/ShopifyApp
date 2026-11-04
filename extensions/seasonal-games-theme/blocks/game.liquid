@@ -1030,7 +1030,176 @@
 (() => {
   const root = document.getElementById("seasonal-game-{{ block.id }}");
   if (!root) return;
+    // ---------- Targeting, frequency and identity ----------
+    const DEFAULT_SETTINGS = {
+      trigger: { type: "time_delay", delaySeconds: 3, scrollDepthPercent: 50 },
+      frequency: { mode: "every_visit", cooldownDays: 7 },
+      playLimit: "unlimited",
+      device: "all",
+    };
+    const MOBILE_EXIT_FALLBACK_SECONDS = 20;
+    const SHORT_PAGE_FALLBACK_SECONDS = 15;
+    const UUID_V4 =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const designMode = Boolean(window.Shopify && window.Shopify.designMode);
   
+    let settings = DEFAULT_SETTINGS;
+    let campaignId = "";
+    let canPlay = true;
+    let playedLocally = false;
+  
+    // Storage can be blocked (private mode, strict settings): fall back to memory.
+    const memoryStore = {};
+    function storage(area) {
+      return {
+        get(key) {
+          try { return window[area].getItem(key); }
+          catch (e) { return memoryStore[area + key] ?? null; }
+        },
+        set(key, value) {
+          try { window[area].setItem(key, value); }
+          catch (e) { memoryStore[area + key] = value; }
+        },
+      };
+    }
+    const local = storage("localStorage");
+    const sessionStore = storage("sessionStorage");
+  
+    function newId() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 3) | 8).toString(16);
+      });
+    }
+    function stableId(store, key) {
+      let value = store.get(key);
+      if (!value || !UUID_V4.test(value)) {
+        value = newId();
+        store.set(key, value);
+      }
+      return value;
+    }
+    const visitorId = stableId(local, "sg:visitor");
+    const sessionId = stableId(sessionStore, "sg:session");
+  
+    function idHeaders() {
+      return { "X-Visitor-Id": visitorId, "X-Session-Id": sessionId };
+    }
+  
+    // ---------- Device ----------
+    function isTouchDevice() {
+      return (
+        window.matchMedia("(hover: none)").matches &&
+        window.matchMedia("(pointer: coarse)").matches
+      );
+    }
+    function isMobileDevice() {
+      return window.matchMedia("(max-width: 767px)").matches || isTouchDevice();
+    }
+    function deviceAllowed(target) {
+      if (target === "desktop") return !isMobileDevice();
+      if (target === "mobile") return isMobileDevice();
+      return true;
+    }
+  
+    function normalizeSettings(raw) {
+      const d = DEFAULT_SETTINGS;
+      if (!raw || typeof raw !== "object") return d;
+      return {
+        trigger: { ...d.trigger, ...(raw.trigger || {}) },
+        frequency: { ...d.frequency, ...(raw.frequency || {}) },
+        playLimit: ["unlimited", "per_session", "per_visitor"].includes(raw.playLimit)
+          ? raw.playLimit : d.playLimit,
+        device: ["all", "desktop", "mobile"].includes(raw.device)
+          ? raw.device : d.device,
+      };
+    }
+  
+    // ---------- Display frequency (popup/banner only) ----------
+    // Stores timestamps/flags, never expiry dates, so editing the cooldown in the
+    // admin takes effect immediately for visitors who already saw the popup.
+    function frequencyAllows() {
+      if (designMode) return true; // let merchants preview in the theme editor
+      const key = "sg:" + campaignId + ":";
+      if (sessionStore.get(key + "dismissed")) return false;
+      const mode = settings.frequency.mode;
+      if (mode === "once_per_session" && sessionStore.get(key + "shown")) return false;
+      if (mode === "once_per_visitor") {
+        const last = Number(local.get(key + "lastShown"));
+        const cooldownMs = settings.frequency.cooldownDays * 86400000;
+        if (last && Date.now() - last < cooldownMs) return false;
+      }
+      return true;
+    }
+    function markShown() {
+      const key = "sg:" + campaignId + ":";
+      sessionStore.set(key + "shown", "1");
+      local.set(key + "lastShown", String(Date.now()));
+    }
+    function markDismissed() {
+      sessionStore.set("sg:" + campaignId + ":dismissed", "1");
+    }
+  
+    // ---------- Triggers (only the selected one is armed) ----------
+    function armTrigger(onFire) {
+      let done = false;
+      const cleanups = [];
+      const fire = () => {
+        if (done) return;
+        done = true;
+        cleanups.forEach((fn) => fn());
+        onFire();
+      };
+      const afterSeconds = (seconds) => {
+        const id = window.setTimeout(fire, Math.max(0, Number(seconds) || 0) * 1000);
+        cleanups.push(() => window.clearTimeout(id));
+      };
+      const trigger = settings.trigger;
+  
+      if (trigger.type === "exit_intent") {
+        // Touch devices have no exit signal: fall back to a timer.
+        if (isTouchDevice()) { afterSeconds(MOBILE_EXIT_FALLBACK_SECONDS); return; }
+        const armedAt = Date.now() + 1000; // ignore the pointer entering the page
+        const onOut = (event) => {
+          if (Date.now() < armedAt) return;
+          if (!event.relatedTarget && event.clientY <= 0) fire();
+        };
+        document.addEventListener("mouseout", onOut);
+        cleanups.push(() => document.removeEventListener("mouseout", onOut));
+        return;
+      }
+  
+      if (trigger.type === "scroll_depth") {
+        const target = Math.min(90, Math.max(10, Number(trigger.scrollDepthPercent) || 50));
+        const scrollable = () =>
+          document.documentElement.scrollHeight - window.innerHeight;
+        const check = () => {
+          const room = scrollable();
+          if (room < 40) return;
+          if ((window.scrollY / room) * 100 >= target) fire();
+        };
+        window.addEventListener("scroll", check, { passive: true });
+        cleanups.push(() => window.removeEventListener("scroll", check));
+        if (scrollable() < 40) afterSeconds(SHORT_PAGE_FALLBACK_SECONDS);
+        check();
+        return;
+      }
+  
+      // time_delay, and the safe default for any unknown trigger type
+      afterSeconds(trigger.delaySeconds ?? 3);
+    }
+  
+    // ---------- Play state ----------
+    function applyPlayedState() {
+      canPlay = false;
+      spinButton.disabled = true;
+      spinLabel.textContent = "PLAYED";
+      subtitle.textContent =
+        settings.playLimit === "per_session"
+          ? "You've already played this session."
+          : "You've already played this game.";
+    }
   // Placement UI: campaign placement comes from the API.
   const placementAnchor = document.createComment("Seasonal Games placement");
   const placementParent = root.parentNode;
@@ -1120,6 +1289,7 @@
   function closePlacement() {
     placementOverlay.hidden = true;
     document.body.style.overflow = previousBodyOverflow;
+    if (placement === "popup") markDismissed();   
   }
 
   function openPlacement() {
@@ -1148,29 +1318,36 @@
     }
   });
 
-  if (placement === "popup") {
-    // Automatically open three seconds after the campaign loads.
-    popupTimer = window.setTimeout(openPlacement, 3000);
-    return;
+  function showBanner() {
+    if (placementBanner) return;
+    placementBanner = document.createElement("div");
+    placementBanner.className = "sg-placement-banner";
+
+    const bannerText = document.createElement("p");
+    bannerText.className = "sg-banner-text";
+    bannerText.textContent = "Feeling lucky? Spin to reveal your reward!";
+
+    const bannerButton = document.createElement("button");
+    bannerButton.type = "button";
+    bannerButton.className = "sg-banner-button";
+    bannerButton.textContent = "Play now";
+    bannerButton.addEventListener("click", openPlacement);
+
+    placementBanner.append(bannerText, bannerButton);
+    document.body.appendChild(placementBanner);
   }
 
-  // Banner placement: visitors open the game by clicking the CTA.
-  placementBanner = document.createElement("div");
-  placementBanner.className = "sg-placement-banner";
+  function reveal() {
+    // Checked again at fire time: another tab may have shown it meanwhile.
+    if (!frequencyAllows()) return;
+    markShown();
+    if (placement === "popup") openPlacement();
+    else showBanner();
+  }
 
-  const bannerText = document.createElement("p");
-  bannerText.className = "sg-banner-text";
-  bannerText.textContent =
-    "Feeling lucky? Spin to reveal your reward!";
-
-  const bannerButton = document.createElement("button");
-  bannerButton.type = "button";
-  bannerButton.className = "sg-banner-button";
-  bannerButton.textContent = "Play now";
-  bannerButton.addEventListener("click", openPlacement);
-
-  placementBanner.append(bannerText, bannerButton);
-  document.body.appendChild(placementBanner);
+  // Nothing to show: frequency says no, or this visitor has used their play.
+  if (!canPlay || !frequencyAllows()) return;
+  armTrigger(reveal);
 }
 
   const wheel = root.querySelector(".wheel");
@@ -1460,31 +1637,45 @@
   if (scale < 1) content.style.transform = `scale(${scale})`;
 }
 
-  async function loadCampaign() {
-    try {
-      const response = await fetch("/apps/seasonal-games");
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      const data = await response.json();
-      if (!data.campaign || !data.campaign.rewards.length) {
-        showEmpty("No active campaigns");
-        return;
-      }
-      applyTheme(data.campaign.theme);
-      rewards = data.campaign.rewards;
-      buildWheel();
-      const placement = ["inline", "popup", "banner"].includes(
-      data.campaign.placement
+async function loadCampaign() {
+  try {
+    const response = await fetch("/apps/seasonal-games", {
+      headers: { Accept: "application/json", ...idHeaders() },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    const data = await response.json();
+    if (!data.campaign || !data.campaign.rewards.length) {
+      showEmpty("No active campaigns");
+      return;
+    }
+    applyTheme(data.campaign.theme);
+    rewards = data.campaign.rewards;
+    buildWheel();
+
+    campaignId = String(data.campaign.id || "");
+    settings = normalizeSettings(data.campaign.settings);
+    canPlay = data.campaign.canPlay !== false;
+
+    // Excluded device: hide the block entirely (inline included).
+    if (!deviceAllowed(settings.device)) {
+      root.style.display = "none";
+      return;
+    }
+
+    const placement = ["inline", "popup", "banner"].includes(
+      data.campaign.placement,
     )
       ? data.campaign.placement
       : "inline";
 
+    if (!canPlay) applyPlayedState();
     setupPlacement(placement);
     fitInline();
-    } catch (error) {
-      showEmpty("No active campaigns");
-    }
+  } catch (error) {
+    showEmpty("No active campaigns");
   }
-
+}
   function buildWheel() {
     const sliceAngle = 360 / rewards.length;
     const gradientStops = rewards.map((reward, index) => {
@@ -1527,7 +1718,7 @@
     }
   }
 
-  function showResult({ reward, code, error }) {
+  function showResult({ reward, code, error, alreadyPlayed }) {
     const pack = packFor(currentTheme).pack;
     const isWin = Boolean(code);
     resultCard.classList.toggle("is-win", isWin);
@@ -1535,12 +1726,14 @@
     root.classList.toggle("is-win-fx", isWin);
 
     if (error) {
-      resultEyebrow.textContent = "Hold on";
-      resultTitle.textContent = "Spin paused";
+      resultEyebrow.textContent = alreadyPlayed ? "One play only" : "Hold on";
+      resultTitle.textContent = alreadyPlayed ? "Already played" : "Spin paused";
       resultReward.textContent = error;
-      resultHint.textContent = "You can try again in a moment.";
+      resultHint.textContent = alreadyPlayed
+        ? "Come back later for another chance."
+        : "You can try again in a moment.";
       resultCodeWrap.hidden = true;
-      closeButton.textContent = "Try again";
+      closeButton.textContent = alreadyPlayed ? "Close" : "Try again";
       burst("miss");
     } else if (isWin) {
       resultEyebrow.textContent = pack.winEyebrow;
@@ -1612,11 +1805,12 @@ copyButton.addEventListener("click", async () => {
 
 
   closeButton.addEventListener("click", () => {
-    hideResult();
-    spinning = false;
-    spinButton.disabled = false;
-    spinLabel.textContent = packFor(currentTheme).pack.spin;
-  });
+  hideResult();
+  spinning = false;
+  spinButton.disabled = false;
+  spinLabel.textContent = packFor(currentTheme).pack.spin;
+  if (playedLocally || !canPlay) applyPlayedState();  
+});
 
   spinButton.addEventListener("click", async () => {
     if (spinning || rewards.length === 0) return;
@@ -1628,16 +1822,40 @@ copyButton.addEventListener("click", async () => {
 
     try {
       if (!pendingSpinKey) pendingSpinKey = crypto.randomUUID();
+      
 
       const response = await fetch("/apps/seasonal-games/discount", {
         method: "POST",
         headers: {
           Accept: "application/json",
           "Idempotency-Key": pendingSpinKey,
+          ...idHeaders(),
         },
       });
 
-      const result = await response.json();
+      const responseText = await response.text();
+      const contentType = response.headers.get("content-type") || "";
+      // #region agent log
+      fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7d855e" },
+        body: JSON.stringify({
+          sessionId: "7d855e",
+          runId: "post-fix",
+          hypothesisId: "B",
+          location: "game.liquid:spinButton",
+          message: "discount fetch returned",
+          data: {
+            status: response.status,
+            contentType: contentType.slice(0, 80),
+            bodyPreview: responseText.slice(0, 180),
+            sentVisitorHeaders: true,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      const result = JSON.parse(responseText);
       if (!response.ok) throw new Error(result.error || "Could not process your spin.");
 
       const winningIndex = result.position;
@@ -1648,8 +1866,8 @@ copyButton.addEventListener("click", async () => {
       ) {
         throw new Error("The server returned an invalid reward position.");
       }
-
       pendingSpinKey = null;
+      if (settings.playLimit !== "unlimited") playedLocally = true;   
 
       const sliceAngle = 360 / rewards.length;
       const extraSpins = 4;

@@ -2,7 +2,12 @@ import type { ActionFunctionArgs } from "react-router";
 import { randomBytes, randomInt } from "node:crypto";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-
+import {
+  hasAlreadyPlayed,
+  normalizePlayLimit,
+  playKeyFor,
+  resolvePlayer,
+} from "../models/play-limit.server";
 
 function existingSpinResponse(spin: {
   status: string;
@@ -81,17 +86,65 @@ async function consumeShopSpinAllowance(shop: string) {
   };
 }
 
-
 export const action = async ({ request }: ActionFunctionArgs) => {
+  console.log("Starting action");
+  // #region agent log
+  fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "7d855e",
+    },
+    body: JSON.stringify({
+      sessionId: "7d855e",
+      runId: "pre-fix",
+      hypothesisId: "B",
+      location: "api.campaign.discount.ts:action:entry",
+      message: "discount action entered",
+      data: {
+        method: request.method,
+        pathname: new URL(request.url).pathname,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (request.method !== "POST") {
     return Response.json(
       { error: "Method not allowed" },
       { status: 405 },
     );
   }
+  console.log("Post req received");
 
-  const { session, admin } =
-  await authenticate.public.appProxy(request);
+  let session;
+  let admin;
+  try {
+    ({ session, admin } = await authenticate.public.appProxy(request));
+  } catch (error) {
+    // #region agent log
+    fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "7d855e",
+      },
+      body: JSON.stringify({
+        sessionId: "7d855e",
+        runId: "pre-fix",
+        hypothesisId: "C",
+        location: "api.campaign.discount.ts:action:auth",
+        message: "appProxy authenticate threw",
+        data: {
+          name: error instanceof Error ? error.name : "unknown",
+          message: error instanceof Error ? error.message : String(error),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    throw error;
+  }
   const idempotencyKey = request.headers.get("Idempotency-Key");
   if (!session || !admin) {
     return Response.json(
@@ -99,6 +152,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 401 },
     );
   }
+  console.log("Authenticated shop");
+  // #region agent log
+  fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "7d855e",
+    },
+    body: JSON.stringify({
+      sessionId: "7d855e",
+      runId: "pre-fix",
+      hypothesisId: "C",
+      location: "api.campaign.discount.ts:action:auth-ok",
+      message: "appProxy authenticate succeeded",
+      data: { hasSession: Boolean(session), hasAdmin: Boolean(admin) },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   const validKey =
     typeof idempotencyKey === "string" &&
@@ -112,6 +184,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 400 },
     );
   }
+  console.log("Valid key");
   const normalizedIdempotencyKey = idempotencyKey!.toLowerCase();
   const existingSpin = await prisma.spin.findUnique({
     where: {
@@ -125,142 +198,111 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
   });
 
-  
-if (existingSpin) {
-  if (
-    existingSpin.status === "pending" &&
-    existingSpin.reward.discountValue === 0
-  ) {
-    const recoveredSpin = await prisma.spin.update({
-      where: { id: existingSpin.id },
-      data: {
-        status: "no_discount",
-        error: null,
-      },
-      include: {
-        reward: true,
-      },
-    });
-  
-    return existingSpinResponse(recoveredSpin);
-  }
-  const needsRecovery =
-    existingSpin.status === "pending" ||
-    existingSpin.status === "recovery_required";
+  if (existingSpin) {
+    console.log("Existing spin found");
+    if (
+      existingSpin.status === "pending" &&
+      existingSpin.reward.discountValue === 0
+    ) {
+      const recoveredSpin = await prisma.spin.update({
+        where: { id: existingSpin.id },
+        data: {
+          status: "no_discount",
+          error: null,
+        },
+        include: {
+          reward: true,
+        },
+      });
 
-  if (
-    needsRecovery &&
-    existingSpin.requestedDiscountCode
-  ) {
-    try {
-      const response = await admin.graphql(
-        `#graphql
-          query FindWheelDiscount($code: String!) {
-            codeDiscountNodeByCode(code: $code) {
-              id
-              codeDiscount {
-                ... on DiscountCodeBasic {
-                  codes(first: 1) {
-                    nodes {
-                      code
+      return existingSpinResponse(recoveredSpin);
+    }
+    const needsRecovery =
+      existingSpin.status === "pending" ||
+      existingSpin.status === "recovery_required";
+
+    if (
+      needsRecovery &&
+      existingSpin.requestedDiscountCode
+    ) {
+      try {
+        console.log("Trying to recover spin");
+        const response = await admin.graphql(
+          `#graphql
+            query FindWheelDiscount($code: String!) {
+              codeDiscountNodeByCode(code: $code) {
+                id
+                codeDiscount {
+                  ... on DiscountCodeBasic {
+                    codes(first: 1) {
+                      nodes {
+                        code
+                      }
                     }
                   }
                 }
               }
             }
-          }
-        `,
-        {
-          variables: {
-            code: existingSpin.requestedDiscountCode,
+          `,
+          {
+            variables: {
+              code: existingSpin.requestedDiscountCode,
+            },
           },
-        },
-      );
+        );
 
-      const result = await response.json();
+        const result = await response.json();
 
-      if (result.errors?.length) {
-        throw new Error("Shopify discount lookup returned errors");
+        if (result.errors?.length) {
+          throw new Error("Shopify discount lookup returned errors");
+        }
+
+        const node = result.data?.codeDiscountNodeByCode;
+        const recoveredCode =
+          node?.codeDiscount?.codes?.nodes?.[0]?.code;
+
+        if (node?.id && recoveredCode) {
+          console.log("Recovered code found");
+          const recoveredSpin = await prisma.spin.update({
+            where: { id: existingSpin.id },
+            data: {
+              status: "issued",
+              discountCode: recoveredCode,
+              shopifyDiscountId: node.id,
+              error: null,
+            },
+            include: {
+              reward: true,
+            },
+          });
+
+          return existingSpinResponse(recoveredSpin);
+        }
+
+        // Not found does NOT prove the original creation failed.
+        return Response.json(
+          {
+            error:
+              "This spin is still being verified. Please try again shortly.",
+          },
+          { status: 503 },
+        );
+      } catch (error) {
+        console.error("Spin recovery lookup failed:", error);
+
+        return Response.json(
+          {
+            error:
+              "This spin is still being verified. Please try again shortly.",
+          },
+          { status: 503 },
+        );
       }
-
-      const node = result.data?.codeDiscountNodeByCode;
-      const recoveredCode =
-        node?.codeDiscount?.codes?.nodes?.[0]?.code;
-
-      if (node?.id && recoveredCode) {
-        const recoveredSpin = await prisma.spin.update({
-          where: { id: existingSpin.id },
-          data: {
-            status: "issued",
-            discountCode: recoveredCode,
-            shopifyDiscountId: node.id,
-            error: null,
-          },
-          include: {
-            reward: true,
-          },
-        });
-
-        return existingSpinResponse(recoveredSpin);
-      }
-
-      // Not found does NOT prove the original creation failed.
-      return Response.json(
-        {
-          error:
-            "This spin is still being verified. Please try again shortly.",
-        },
-        { status: 503 },
-      );
-    } catch (error) {
-      console.error("Spin recovery lookup failed:", error);
-
-      return Response.json(
-        {
-          error:
-            "This spin is still being verified. Please try again shortly.",
-        },
-        { status: 503 },
-      );
     }
+
+    console.log("Returning existing spin");
+    return existingSpinResponse(existingSpin);
   }
-
-  return existingSpinResponse(existingSpin);
-}
-
-
-
-  
-  
-let allowance;
-
-try {
-  allowance = await consumeShopSpinAllowance(session.shop);
-} catch (error) {
-  console.error("Spin rate limit check failed:", error);
-
-  // Fail closed: don't issue a reward if the limit
-  // cannot be checked reliably.
-  return Response.json(
-    { error: "Spin service temporarily unavailable. Please try again." },
-    { status: 503 },
-  );
-}
-
-if (!allowance.allowed) {
-  return Response.json(
-    {
-      error: "Too many spin attempts. Please try again shortly.",
-    },
-    {
-      status: 429,
-      headers: {
-        "Retry-After": String(allowance.retryAfterSeconds),
-      },
-    },
-  );
-}
-
 
   const campaign = await prisma.campaign.findFirst({
     where: {
@@ -280,11 +322,118 @@ if (!allowance.allowed) {
     },
   });
 
-  
   if (!campaign || campaign.rewards.length === 0) {
     return Response.json(
       { error: "No active wheel campaign found" },
       { status: 404 },
+    );
+  }
+  console.log("Campaign found");
+  // ---- Play limit (server-side enforcement) ----
+  // #region agent log
+  fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "7d855e",
+    },
+    body: JSON.stringify({
+      sessionId: "7d855e",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "api.campaign.discount.ts:action:play-limit",
+      message: "about to call play-limit helpers",
+      data: {
+        normalizePlayLimitType: typeof normalizePlayLimit,
+        resolvePlayerType: typeof resolvePlayer,
+        hasAlreadyPlayedType: typeof hasAlreadyPlayed,
+        playKeyForType: typeof playKeyFor,
+        visitorHeaderPresent: Boolean(request.headers.get("X-Visitor-Id")),
+        sessionHeaderPresent: Boolean(request.headers.get("X-Session-Id")),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  let playLimit;
+  let player;
+  try {
+    playLimit = normalizePlayLimit(campaign.playLimit);
+    player = resolvePlayer(request);
+  } catch (error) {
+    // #region agent log
+    fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "7d855e",
+      },
+      body: JSON.stringify({
+        sessionId: "7d855e",
+        runId: "pre-fix",
+        hypothesisId: "A",
+        location: "api.campaign.discount.ts:action:play-limit-error",
+        message: "play-limit helpers threw",
+        data: {
+          name: error instanceof Error ? error.name : "unknown",
+          message: error instanceof Error ? error.message : String(error),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    throw error;
+  }
+
+  if (playLimit !== "unlimited") {
+    // The storefront always sends these. Without them we can't enforce the limit.
+    if (!player.visitorId || !player.sessionId) {
+      return Response.json(
+        { error: "A visitor identifier is required for this campaign." },
+        { status: 400 },
+      );
+    }
+    console.log("Player found");
+
+    if (await hasAlreadyPlayed(campaign.id, playLimit, player)) {
+      return Response.json(
+        {
+          error: "You've already played this game.",
+          code: "already_played",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+
+  let allowance;
+
+  try {
+    allowance = await consumeShopSpinAllowance(session.shop);
+  } catch (error) {
+    console.error("Spin rate limit check failed:", error);
+
+    // Fail closed: don't issue a reward if the limit
+    // cannot be checked reliably.
+    return Response.json(
+      { error: "Spin service temporarily unavailable. Please try again." },
+      { status: 503 },
+    );
+  }
+  console.log("Allowance found");
+
+  if (!allowance.allowed) {
+    return Response.json(
+      {
+        error: "Too many spin attempts. Please try again shortly.",
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(allowance.retryAfterSeconds),
+        },
+      },
     );
   }
 
@@ -327,12 +476,12 @@ if (!allowance.allowed) {
       { status: 422 },
     );
   }
-
+  console.log("Valid reward configuration");
 
   // The server chooses the winning reward.
   const winningIndex = randomInt(0, campaign.rewards.length);
   const winningReward = campaign.rewards[winningIndex];
-  
+
   // Validate the selected reward before creating a spin record.
   if (
     winningReward.discountType !== "percentage" ||
@@ -345,50 +494,59 @@ if (!allowance.allowed) {
       { status: 422 },
     );
   }
-
+  console.log("Valid reward generated");
   const code =
-  winningReward.discountValue > 0
-    ? `SG-${randomBytes(8).toString("hex").toUpperCase()}`
-    : null;
+    winningReward.discountValue > 0
+      ? `SG-${randomBytes(8).toString("hex").toUpperCase()}`
+      : null;
   let spin;
-  
-  
-try {
-  spin = await prisma.spin.create({
-    data: {
-      shop: session.shop,
-      campaignId: campaign.id,
-      campaignRewardId: winningReward.id,
-      idempotencyKey: normalizedIdempotencyKey,
-      status: "pending",
-      requestedDiscountCode: code,
-    },
-  });
-} catch (error) {
-  // Another simultaneous request may have created this key first.
-  const duplicateSpin = await prisma.spin.findUnique({
-    where: {
-      shop_idempotencyKey: {
-        shop: session.shop,
-        idempotencyKey: normalizedIdempotencyKey,
-      },
-    },
-    include: {
-      reward: true,
-    },
-  });
 
-  if (duplicateSpin) {
-    return existingSpinResponse(duplicateSpin);
+  try {
+    spin = await prisma.spin.create({
+      data: {
+        shop: session.shop,
+        campaignId: campaign.id,
+        campaignRewardId: winningReward.id,
+        idempotencyKey: normalizedIdempotencyKey,
+        status: "pending",
+        requestedDiscountCode: code,
+        // new:
+        visitorId: player.visitorId,
+        sessionId: player.sessionId,
+        customerId: player.customerId,
+        playKey: playKeyFor(campaign.id, playLimit, player),
+      },
+    });
+  } catch (error) {
+    // Another simultaneous request may have created this key first.
+    const duplicateSpin = await prisma.spin.findUnique({
+      where: {
+        shop_idempotencyKey: {
+          shop: session.shop,
+          idempotencyKey: normalizedIdempotencyKey,
+        },
+      },
+      include: {
+        reward: true,
+      },
+    });
+
+    if (duplicateSpin) {
+      return existingSpinResponse(duplicateSpin);
+    }
+    // Unique-constraint failure on playKey: another spin already used this play.
+    if ((error as { code?: string })?.code === "P2002") {
+      return Response.json(
+        { error: "You've already played this game.", code: "already_played" },
+        { status: 409 },
+      );
+    }
+
+    // This was not a duplicate-key collision.
+    throw error;
   }
 
-  // This was not a duplicate-key collision.
-  throw error;
-}
-
-
   // A zero-value reward, such as TRY AGAIN, needs no discount code.
-  
   if (winningReward.discountValue === 0) {
     await prisma.spin.update({
       where: { id: spin.id },
@@ -402,7 +560,6 @@ try {
     });
   }
 
-  
   let result: any;
   let creation: any;
 
@@ -462,8 +619,9 @@ try {
     await prisma.spin.update({
       where: { id: spin.id },
       data: {
-        status: "recovery_required",
-        error: "Shopify discount creation outcome is uncertain",
+        status: "failed",
+        error: "Shopify rejected discount creation",
+        playKey: null,
       },
     });
 
@@ -488,7 +646,7 @@ try {
     });
 
     return Response.json(
-      { error: "Your spin is being checked. Please try again shortly." },
+      { error: "Your spin is being checked. Please try shortly." },
       { status: 503 },
     );
   }
@@ -527,11 +685,10 @@ try {
     });
 
     return Response.json(
-      { error: "Your spin is being checked. Please try again shortly." },
+      { error: "Your spin is being checked. Please try shortly." },
       { status: 503 },
     );
   }
-
 
   try {
     await prisma.spin.update({
@@ -545,7 +702,7 @@ try {
     });
   } catch (error) {
     console.error("Failed to save issued spin:", error);
-  
+
     // Shopify has already created the discount.
     // Keep the original requestedDiscountCode so a retry can recover it.
     return Response.json(
@@ -556,11 +713,33 @@ try {
       { status: 503 },
     );
   }
-  
+  console.log("starting return");
+  // #region agent log
+  fetch("http://127.0.0.1:7581/ingest/bb6860e5-0afc-4b38-a6a3-508255d89622", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "7d855e",
+    },
+    body: JSON.stringify({
+      sessionId: "7d855e",
+      runId: "post-fix",
+      hypothesisId: "A",
+      location: "api.campaign.discount.ts:action:success",
+      message: "discount action returning JSON reward",
+      data: {
+        status: 200,
+        hasCode: Boolean(createdCode),
+        position: winningReward.position,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   return Response.json({
     reward: winningReward.reward,
     position: winningReward.position,
     code: createdCode,
   });
-
 };

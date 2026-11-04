@@ -1,13 +1,23 @@
 import prisma from "../db.server";
 import {
+  COOLDOWN_OPTIONS,
+  DEVICES,
+  FREQUENCIES,
+  LEGACY_PLAY_LIMIT,
   MAX_REWARDS,
   MIN_REWARDS,
   PLACEMENTS,
+  PLAY_LIMITS,
+  SCROLL_DEPTH_RANGE,
+  SETTING_DEFAULTS_NEW,
   THEMES,
+  TRIGGERS,
+  TRIGGER_DELAY_RANGE,
   rewardLabel,
 } from "../utils/campaign";
+import type { CampaignSettings } from "../utils/campaign";
 
-export type CampaignInput = {
+export type CampaignInput = CampaignSettings & {
   name: string;
   theme: string;
   placement: string;
@@ -15,8 +25,15 @@ export type CampaignInput = {
   discountValues: number[];
 };
 
+function intField(raw: FormDataEntryValue | null, fallback: number) {
+  if (raw === null || String(raw).trim() === "") return fallback;
+  return Number(raw);
+}
+
 export type FormErrors = {
   name?: string;
+  triggerDelaySeconds?: string;
+  scrollDepthPercent?: string;
   rewards?: Record<number, string>;
   form?: string;
 };
@@ -44,6 +61,51 @@ export function parseCampaignForm(
     errors.form = "Please choose a valid placement.";
   if (!["draft", "active"].includes(status))
     errors.form = "Status must be either draft or active.";
+
+  // Targeting and limits. Missing values fall back to defaults.
+  const D = SETTING_DEFAULTS_NEW;
+  const triggerType = String(formData.get("triggerType") ?? D.triggerType);
+  const triggerDelaySeconds = intField(
+    formData.get("triggerDelaySeconds"),
+    D.triggerDelaySeconds,
+  );
+  const scrollDepthPercent = intField(
+    formData.get("scrollDepthPercent"),
+    D.scrollDepthPercent,
+  );
+  const displayFrequency = String(
+    formData.get("displayFrequency") ?? D.displayFrequency,
+  );
+  const cooldownDays = intField(formData.get("cooldownDays"), D.cooldownDays);
+  const playLimit = String(formData.get("playLimit") ?? D.playLimit);
+  const deviceTarget = String(formData.get("deviceTarget") ?? D.deviceTarget);
+
+  if (!TRIGGERS.some((t) => t.value === triggerType))
+    errors.form = "Please choose a valid trigger.";
+  if (
+    !Number.isInteger(triggerDelaySeconds) ||
+    triggerDelaySeconds < TRIGGER_DELAY_RANGE.min ||
+    triggerDelaySeconds > TRIGGER_DELAY_RANGE.max
+  )
+    errors.triggerDelaySeconds = `Enter a whole number from ${TRIGGER_DELAY_RANGE.min} to ${TRIGGER_DELAY_RANGE.max}.`;
+  if (
+    !Number.isInteger(scrollDepthPercent) ||
+    scrollDepthPercent < SCROLL_DEPTH_RANGE.min ||
+    scrollDepthPercent > SCROLL_DEPTH_RANGE.max
+  )
+    errors.scrollDepthPercent = `Enter a whole number from ${SCROLL_DEPTH_RANGE.min} to ${SCROLL_DEPTH_RANGE.max}.`;
+  if (!FREQUENCIES.some((f) => f.value === displayFrequency))
+    errors.form = "Please choose a valid display frequency.";
+  if (!COOLDOWN_OPTIONS.includes(cooldownDays))
+    errors.form = "Please choose a valid cooldown.";
+  if (
+    ![...PLAY_LIMITS.map((p) => p.value), LEGACY_PLAY_LIMIT.value].includes(
+      playLimit,
+    )
+  )
+    errors.form = "Please choose a valid play limit.";
+  if (!DEVICES.some((d) => d.value === deviceTarget))
+    errors.form = "Please choose a valid device target.";
 
   if (
     !Number.isInteger(rewardCount) ||
@@ -85,6 +147,13 @@ export function parseCampaignForm(
       placement,
       status: status as "draft" | "active",
       discountValues,
+      triggerType,
+      triggerDelaySeconds,
+      scrollDepthPercent,
+      displayFrequency,
+      cooldownDays,
+      playLimit,
+      deviceTarget,
     },
   };
 }
@@ -119,6 +188,13 @@ export async function createCampaign(shop: string, input: CampaignInput) {
         theme: input.theme,
         placement: input.placement,
         status: input.status,
+        triggerType: input.triggerType,
+        triggerDelaySeconds: input.triggerDelaySeconds,
+        scrollDepthPercent: input.scrollDepthPercent,
+        displayFrequency: input.displayFrequency,
+        cooldownDays: input.cooldownDays,
+        playLimit: input.playLimit,
+        deviceTarget: input.deviceTarget,
         rewardCount: input.discountValues.length,
         rewards: { create: buildRewards(input.discountValues) },
       },
@@ -176,6 +252,13 @@ export async function updateCampaign(
           theme: input.theme,
           placement: input.placement,
           status: input.status,
+          triggerType: input.triggerType,
+          triggerDelaySeconds: input.triggerDelaySeconds,
+          scrollDepthPercent: input.scrollDepthPercent,
+          displayFrequency: input.displayFrequency,
+          cooldownDays: input.cooldownDays,
+          playLimit: input.playLimit,
+          deviceTarget: input.deviceTarget,
           rewardCount: newRewards.length,
           rewards: {
             update: toUpdate,
